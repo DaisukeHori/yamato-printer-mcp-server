@@ -17,7 +17,7 @@ import { promises as fs } from "fs";
 import { join } from "path";
 import pino from "pino";
 
-import type { PrintOptions, SlipType } from "../types.js";
+import type { PrintOptions } from "../types.js";
 import {
   resolveSlipPreset,
   listSupportedSlipTypes,

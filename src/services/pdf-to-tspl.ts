@@ -57,20 +57,31 @@ function mmToDots(mm: number): number {
  * Raspberry Pi (ARM64) でも動作する。
  *
  * @param pdfBuffer   PDFファイルのバッファ
- * @param targetWidth レンダリング時のターゲット幅(pixel)
+ * @param targetWidth レンダリング時のターゲット幅(pixel)。
+ *                    実際のリサイズは後段のsharpで行うため、ここでは
+ *                    targetWidth を下回らないよう scale の下限計算に使う。
  * @returns 最初のページのPNGバッファ
  */
 async function rasterizePdfFirstPage(
   pdfBuffer: Buffer,
   targetWidth: number
 ): Promise<{ pngBuffer: Buffer; pageCount: number }> {
-  // pdf-to-img は Uint8Array を要求
-  // scale を調整してレンダリング解像度を制御
-  // 基準は72dpi (PDF pt → pixel)、targetWidth / PDF幅 = scale
-  const scale = parseFloat(process.env.PDF_RENDER_SCALE || "1.0");
+  // pdf-to-img は内部で 72dpi 基準で pixel 化する。
+  // 典型的なヤマトB2クラウドのPDFページ幅 ≈ 306pt (108mm相当) のため、
+  // targetWidth (dots) / 306 を下限として scale を設定すると、
+  // リサイズ時にアップスケールが発生せず画質が保たれる。
+  // 環境変数 PDF_RENDER_SCALE で明示的上書きも可能。
+  const envScale = parseFloat(process.env.PDF_RENDER_SCALE || "1.0");
+  const derivedScale = Math.max(1.0, Math.ceil(targetWidth / 306));
+  const scale = Math.max(envScale, derivedScale);
+
+  logger.debug(
+    { targetWidth, envScale, derivedScale, finalScale: scale },
+    "Rasterization scale computed"
+  );
 
   const doc = await pdf(pdfBuffer, {
-    scale: Math.max(scale, 1.0),
+    scale,
   });
 
   const pageCount = doc.length;
