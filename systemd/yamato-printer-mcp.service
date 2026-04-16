@@ -1,0 +1,60 @@
+[Unit]
+Description=Yamato Printer MCP Server
+Documentation=https://github.com/DaisukeHori/yamato-printer-mcp-server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# 実行ユーザー (pi はデフォルト。別ユーザーなら要変更)
+# lp グループに属している必要あり (/dev/usb/lp0 書き込み権限)
+User=pi
+Group=lp
+
+# 作業ディレクトリ (git clone したパスに変更)
+WorkingDirectory=/home/pi/yamato-printer-mcp-server
+
+# 実行コマンド
+ExecStart=/usr/bin/node /home/pi/yamato-printer-mcp-server/dist/index.js
+
+# 起動前にビルドの存在確認
+ExecStartPre=/bin/sh -c 'test -f /home/pi/yamato-printer-mcp-server/dist/index.js || (echo "dist/index.js not found — run: npm run build" >&2; exit 1)'
+
+# 環境変数は .env から読む (dotenv 経由でアプリが読み込むので EnvironmentFile は不要だが、
+# systemd レベルでも読みたい場合は以下をアンコメント):
+# EnvironmentFile=/home/pi/yamato-printer-mcp-server/.env
+
+# 再起動ポリシー
+Restart=always
+RestartSec=10
+StartLimitInterval=60
+StartLimitBurst=5
+
+# 標準出力・エラーを journald へ
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=yamato-printer-mcp
+
+# リソース制限 (Pi Zero 2 W のRAMは512MB)
+MemoryMax=400M
+TasksMax=128
+
+# ハードニング
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/pi/yamato-printer-mcp-server /tmp/yamato-printer-uploads /var/lib/yamato-printer-mcp /dev/usb/lp0
+PrivateTmp=false
+PrivateDevices=false
+DeviceAllow=/dev/usb/lp0 rw
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+RestrictRealtime=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

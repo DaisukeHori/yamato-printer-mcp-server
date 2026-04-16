@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# SQLite databases
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Upload temp directory
+/tmp/yamato-printer-uploads/
+
+# Logs
+logs/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Claude credentials (念のため)
+.claude/
+claude_desktop_config.json
+
+# Backup files
+*.bak
+*.backup
+*.swp
+*~
+
+# Cloudflared credentials
+.cloudflared/*.json

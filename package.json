@@ -1,0 +1,59 @@
+{
+  "name": "yamato-printer-mcp-server",
+  "version": "0.1.0",
+  "description": "Unofficial MCP server for printing Yamato shipping labels on TSPL-based label printers (e.g., WS-420B)",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/**/*.ts",
+    "print-sample": "tsx scripts/print-sample.ts",
+    "test": "echo 'Tests not implemented yet' && exit 0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "better-sqlite3": "^11.5.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.1",
+    "multer": "^1.4.5-lts.1",
+    "pdf-to-img": "^4.2.0",
+    "pino": "^9.5.0",
+    "pino-pretty": "^13.0.0",
+    "sharp": "^0.33.5",
+    "uuid": "^11.0.3",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/express": "^5.0.0",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.10.1",
+    "@types/uuid": "^10.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DaisukeHori/yamato-printer-mcp-server.git"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "yamato",
+    "label-printer",
+    "tspl",
+    "thermal-printer",
+    "raspberry-pi",
+    "ws-420b",
+    "xprinter",
+    "shipping-label"
+  ],
+  "author": "Daisuke Hori",
+  "license": "MIT"
+}

@@ -1,0 +1,45 @@
+# -------------------------------------------------------------------
+# Cloudflare Tunnel 設定テンプレート
+#
+# 使い方:
+#   1. cloudflared をインストール (setup-pi.sh で自動)
+#   2. cloudflared tunnel login  (Cloudflare アカウントで認証)
+#   3. cloudflared tunnel create yamato-printer
+#      → ~/.cloudflared/<TUNNEL-UUID>.json が作られる
+#   4. cp cloudflared/config.yml.example ~/.cloudflared/config.yml
+#   5. tunnel UUID とホスト名を書き換え
+#   6. cloudflared tunnel route dns yamato-printer yamato-printer.appserver.tokyo
+#   7. sudo systemctl enable --now cloudflared
+# -------------------------------------------------------------------
+
+# Tunnel UUID (cloudflared tunnel create 時に返される値)
+tunnel: CHANGE_ME_TO_YOUR_TUNNEL_UUID
+
+# 認証情報ファイルのパス
+credentials-file: /home/pi/.cloudflared/CHANGE_ME_TO_YOUR_TUNNEL_UUID.json
+
+# ログレベル (debug | info | warn | error)
+loglevel: info
+
+# トラフィックメトリクス (オプション)
+# metrics: 127.0.0.1:2000
+
+# -------------------------------------------------------------------
+# Ingress ルーティング
+# -------------------------------------------------------------------
+ingress:
+  # yamato-printer.appserver.tokyo へのHTTPSアクセスを
+  # localhost:8719 (yamato-printer-mcp-server) に転送
+  - hostname: yamato-printer.appserver.tokyo
+    service: http://localhost:8719
+    originRequest:
+      # Pi Zero 2 W のRAM節約のため、キープアライブ接続数を制限
+      keepAliveConnections: 10
+      keepAliveTimeout: 30s
+      connectTimeout: 30s
+      # 長いPDF処理に対応するため、応答タイムアウトを延長
+      tcpKeepAlive: 30s
+      noHappyEyeballs: false
+
+  # その他のホスト名はすべて404
+  - service: http_status:404

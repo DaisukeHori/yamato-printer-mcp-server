@@ -1,0 +1,36 @@
+MIT License
+
+Copyright (c) 2026 Daisuke Hori
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+TRADEMARK NOTICE
+
+"YAMATO", "ヤマト", "クロネコ", "KURONEKO", "宅急便", "B2クラウド" and related
+marks are trademarks or registered trademarks of Yamato Holdings Co., Ltd.
+or its affiliated companies. This project is not affiliated with, endorsed by,
+or sponsored by Yamato Transport Co., Ltd. or Yamato Holdings Co., Ltd.
+
+The name "yamato-printer-mcp-server" is used solely to describe the primary
+use case of this software (printing shipping labels produced by Yamato's B2
+Cloud service on third-party label printers). The software itself does not
+integrate with any Yamato service; it only processes PDF files that users
+have already obtained through legitimate means.
