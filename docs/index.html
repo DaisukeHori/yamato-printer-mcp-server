@@ -1,0 +1,2048 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="ヤマト送り状PDFをラズパイ+サーマルプリンタで印刷するMCPサーバー。Unofficial / Open source / TypeScript / 203 tests passing.">
+<meta name="theme-color" content="#0e0d0b">
+<meta property="og:title" content="yamato-printer-mcp-server">
+<meta property="og:description" content="送り状印刷の自動化。Claude からコマンド1つで、卓上のサーマルプリンタにラベルが流れ出す。">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://daisukehori.github.io/yamato-printer-mcp-server/">
+<title>yamato-printer-mcp-server — 送り状印刷を Claude から</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@300;400;500;700;900&family=Zen+Old+Mincho:wght@400;500;700;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --ink:       #0e0d0b;        /* 墨 */
+    --ink-soft:  #1d1b17;
+    --paper:     #f4efe3;        /* 和紙 */
+    --paper-2:   #e8e1d0;
+    --paper-dim: #d7ceb8;
+    --shu:       #b93c2b;        /* 朱 */
+    --shu-dark:  #7c2619;
+    --shu-soft:  rgba(185, 60, 43, 0.10);
+    --ko:        #c99a2b;        /* 黄金 (アクセント) */
+    --line:      #2a2722;
+    --line-soft: rgba(14, 13, 11, 0.12);
+    --seal:      #c03a2b;
+
+    --serif:  'Zen Old Mincho', 'Noto Serif JP', serif;
+    --sans:   'Zen Kaku Gothic New', 'Hiragino Kaku Gothic ProN', sans-serif;
+    --mono:   'JetBrains Mono', 'Menlo', 'Consolas', monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-weight: 400;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
+
+  /* 和紙テクスチャ (SVG ノイズ) */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.36  0 0 0 0 0.30  0 0 0 0 0.18  0 0 0 0.10 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 1;
+    mix-blend-mode: multiply;
+    opacity: 0.45;
+  }
+
+  /* レイヤー順序 */
+  header, main, footer, nav, .reel { position: relative; z-index: 2; }
+
+  /* ========== NAV ========== */
+
+  nav.topbar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: rgba(244, 239, 227, 0.92);
+    backdrop-filter: saturate(140%) blur(6px);
+    -webkit-backdrop-filter: saturate(140%) blur(6px);
+    border-bottom: 1px solid var(--line-soft);
+  }
+  nav.topbar .inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 28px;
+  }
+  nav .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-family: var(--serif);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    font-size: 15px;
+  }
+  nav .brand .seal {
+    width: 28px; height: 28px;
+    border: 1.5px solid var(--shu);
+    background: var(--shu);
+    color: var(--paper);
+    display: grid;
+    place-items: center;
+    font-family: var(--serif);
+    font-weight: 900;
+    font-size: 11px;
+    letter-spacing: -0.5px;
+    transform: rotate(-4deg);
+    box-shadow: 2px 2px 0 var(--ink);
+  }
+  nav .links {
+    display: flex;
+    gap: 30px;
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+  nav .links a {
+    color: var(--ink);
+    text-decoration: none;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+    position: relative;
+  }
+  nav .links a:hover { opacity: 1; }
+  nav .links a::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; bottom: -6px;
+    height: 2px;
+    background: var(--shu);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.2s ease;
+  }
+  nav .links a:hover::after { transform: scaleX(1); }
+  @media (max-width: 720px) {
+    nav .links { display: none; }
+  }
+
+  /* ========== HERO ========== */
+
+  .hero {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 88px 28px 80px;
+    position: relative;
+  }
+  .hero .kicker {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--shu);
+    margin-bottom: 28px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .hero .kicker::before,
+  .hero .kicker::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--shu);
+    opacity: 0.3;
+  }
+  .hero .kicker span {
+    flex: 0 0 auto;
+  }
+  .hero h1 {
+    font-family: var(--serif);
+    font-weight: 900;
+    font-size: clamp(40px, 7vw, 84px);
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    margin-bottom: 28px;
+    color: var(--ink);
+  }
+  .hero h1 .accent {
+    color: var(--shu);
+    position: relative;
+    display: inline-block;
+  }
+  .hero h1 .accent::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; bottom: -8px;
+    height: 6px;
+    background: var(--shu);
+    opacity: 0.2;
+    z-index: -1;
+  }
+  .hero .lead {
+    font-family: var(--serif);
+    font-size: clamp(16px, 1.5vw, 20px);
+    line-height: 1.75;
+    color: var(--ink-soft);
+    max-width: 640px;
+    margin-bottom: 16px;
+  }
+  .hero .lead-en {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--ink-soft);
+    opacity: 0.7;
+    max-width: 640px;
+    margin-bottom: 44px;
+    line-height: 1.6;
+  }
+  .hero-cta {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 24px;
+    font-family: var(--mono);
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    text-decoration: none;
+    border: 1.5px solid var(--ink);
+    transition: transform 0.2s, box-shadow 0.2s;
+    cursor: pointer;
+  }
+  .btn-primary {
+    background: var(--ink);
+    color: var(--paper);
+  }
+  .btn-primary:hover {
+    transform: translate(-2px, -2px);
+    box-shadow: 4px 4px 0 var(--shu);
+  }
+  .btn-secondary {
+    background: transparent;
+    color: var(--ink);
+  }
+  .btn-secondary:hover {
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  /* ========== Unofficial 注記 ========== */
+
+  .unofficial-banner {
+    max-width: 1200px;
+    margin: 0 auto 60px;
+    padding: 0 28px;
+  }
+  .unofficial-banner .box {
+    border: 1px dashed var(--shu-dark);
+    background: var(--shu-soft);
+    padding: 18px 22px;
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    font-size: 13px;
+    line-height: 1.7;
+  }
+  .unofficial-banner .box .icon {
+    flex: 0 0 auto;
+    font-family: var(--serif);
+    font-weight: 900;
+    color: var(--shu);
+    font-size: 22px;
+    line-height: 1;
+    margin-top: 2px;
+  }
+  .unofficial-banner .box strong {
+    color: var(--shu-dark);
+    font-weight: 700;
+  }
+
+  /* ========== RECEIPT / TICKET ==========
+     印字されたラベルを模したモックアップ */
+
+  .receipt-section {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 60px 28px 100px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 60px;
+    align-items: center;
+  }
+  @media (max-width: 880px) {
+    .receipt-section { grid-template-columns: 1fr; gap: 40px; }
+  }
+  .receipt {
+    background: #fbfaf5;
+    border: 1px solid var(--line-soft);
+    padding: 32px 28px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.85;
+    color: var(--ink);
+    position: relative;
+    box-shadow:
+      0 1px 0 var(--paper-dim),
+      0 8px 24px rgba(14, 13, 11, 0.12),
+      0 40px 60px rgba(14, 13, 11, 0.06);
+    transform: rotate(-1.5deg);
+    max-width: 440px;
+    justify-self: center;
+  }
+  /* ラベル下端のギザギザ */
+  .receipt::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; bottom: -10px;
+    height: 10px;
+    background-image:
+      linear-gradient(135deg, transparent 50%, #fbfaf5 50%),
+      linear-gradient(225deg, transparent 50%, #fbfaf5 50%);
+    background-size: 12px 10px;
+    background-repeat: repeat-x;
+    background-position: 0 0, 6px 0;
+  }
+  .receipt .hdr {
+    text-align: center;
+    border-bottom: 2px double var(--ink);
+    padding-bottom: 14px;
+    margin-bottom: 16px;
+  }
+  .receipt .hdr-big {
+    font-family: var(--serif);
+    font-weight: 900;
+    font-size: 18px;
+    letter-spacing: 0.04em;
+    margin-bottom: 4px;
+  }
+  .receipt .hdr-sm {
+    font-size: 10px;
+    opacity: 0.65;
+    letter-spacing: 0.08em;
+  }
+  .receipt .row {
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 1px dashed var(--line-soft);
+    padding: 4px 0;
+  }
+  .receipt .row strong { font-weight: 700; }
+  .receipt .barcode {
+    text-align: center;
+    margin: 20px 0 10px;
+    font-family: 'Libre Barcode 39', monospace;
+    font-size: 48px;
+    letter-spacing: -0.02em;
+    line-height: 1;
+  }
+  .receipt .barcode-text {
+    text-align: center;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    opacity: 0.7;
+  }
+  .receipt .status-stamp {
+    position: absolute;
+    top: 20px;
+    right: -8px;
+    border: 2.5px solid var(--shu);
+    color: var(--shu);
+    font-family: var(--serif);
+    font-weight: 900;
+    padding: 6px 10px;
+    font-size: 13px;
+    letter-spacing: 0.1em;
+    transform: rotate(12deg);
+    background: rgba(251, 250, 245, 0.85);
+  }
+
+  .hero-text-right h2 {
+    font-family: var(--serif);
+    font-weight: 900;
+    font-size: clamp(24px, 3vw, 36px);
+    line-height: 1.25;
+    margin-bottom: 24px;
+    color: var(--ink);
+  }
+  .hero-text-right p {
+    font-size: 15px;
+    line-height: 1.9;
+    color: var(--ink-soft);
+    margin-bottom: 20px;
+    max-width: 500px;
+  }
+  .hero-text-right .meta-line {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--shu);
+    letter-spacing: 0.1em;
+    margin-top: 30px;
+    text-transform: uppercase;
+  }
+
+  /* ========== ASCII BORDER ========== */
+
+  .ascii-divider {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 28px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink);
+    opacity: 0.35;
+    letter-spacing: 0.3em;
+    white-space: nowrap;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* ========== FEATURES ========== */
+
+  section.features {
+    background: var(--ink);
+    color: var(--paper);
+    padding: 100px 28px;
+    margin-top: 40px;
+    position: relative;
+    overflow: hidden;
+  }
+  section.features::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(circle at 20% 30%, rgba(201, 154, 43, 0.08) 0%, transparent 50%),
+                      radial-gradient(circle at 80% 70%, rgba(185, 60, 43, 0.08) 0%, transparent 50%);
+    pointer-events: none;
+  }
+  section.features .inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    position: relative;
+  }
+  section.features .section-kicker {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.24em;
+    color: var(--ko);
+    margin-bottom: 16px;
+    text-transform: uppercase;
+  }
+  section.features h2 {
+    font-family: var(--serif);
+    font-weight: 900;
+    font-size: clamp(32px, 4.5vw, 56px);
+    line-height: 1.15;
+    margin-bottom: 60px;
+    max-width: 800px;
+    letter-spacing: -0.01em;
+  }
+  section.features h2 .em {
+    color: var(--ko);
+    font-style: italic;
+  }
+  .tools-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .tool {
+    background: var(--ink);
+    padding: 28px 26px;
+    transition: background 0.2s;
+  }
+  .tool:hover {
+    background: var(--ink-soft);
+  }
+  .tool .index {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ko);
+    letter-spacing: 0.2em;
+    margin-bottom: 14px;
+  }
+  .tool h3 {
+    font-family: var(--mono);
+    font-weight: 500;
+    font-size: 17px;
+    color: var(--paper);
+    margin-bottom: 8px;
+  }
+  .tool .jp {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 14px;
+    color: var(--ko);
+    margin-bottom: 12px;
+    letter-spacing: 0.02em;
+  }
+  .tool p {
+    font-size: 13.5px;
+    line-height: 1.75;
+    color: rgba(244, 239, 227, 0.75);
+  }
+
+  /* ========== FLOW / HOW IT WORKS ========== */
+
+  section.flow {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 120px 28px 100px;
+  }
+  section.flow .section-kicker {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.24em;
+    color: var(--shu);
+    margin-bottom: 16px;
+    text-transform: uppercase;
+  }
+  section.flow h2 {
+    font-family: var(--serif);
+    font-weight: 900;
+    font-size: clamp(32px, 4vw, 48px);
+    line-height: 1.15;
+    margin-bottom: 70px;
+    max-width: 700px;
+    letter-spacing: -0.01em;
+  }
+  .flow-diagram {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    align-items: stretch;
+  }
+  @media (max-width: 920px) {
+    .flow-diagram { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 520px) {
+    .flow-diagram { grid-template-columns: 1fr; }
+  }
+  .step {
+    background: var(--paper);
+    border: 1.5px solid var(--ink);
+    padding: 24px 20px;
+    position: relative;
+    min-height: 200px;
+    display: flex;
+    flex-direction: column;
+    transition: transform 0.2s;
+  }
+  .step:hover { transform: translate(-3px, -3px); box-shadow: 3px 3px 0 var(--shu); }
+  .step .num {
+    font-family: var(--serif);
+    font-weight: 900;
+    font-size: 60px;
+    line-height: 1;
+    color: var(--paper-2);
+    position: absolute;
+    top: 10px;
+    right: 16px;
+    z-index: 0;
+  }
+  .step .content { position: relative; z-index: 1; }
+  .step h3 {
+    font-family: var(--serif);
+    font-weight: 700;
+    font-size: 17px;
+    margin-bottom: 12px;
+    line-height: 1.4;
+  }
+  .step p {
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--ink-soft);
+  }
+  .step .badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--shu);
+    letter-spacing: 0.15em;
+    margin-bottom: 10px;
+    text-transform: uppercase;
+  }
+
+  /* ========== CODE BLOCK ========== */
+
+  section.quickstart {
+    background: var(--ink);
+    color: var(--paper);
+    padding: 100px 28px;
+  }
+  section.quickstart .inner {
+    max-width: 1000px;
+    margin: 0 auto;
+  }
+  section.quickstart .section-kicker {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.24em;
+    color: var(--ko);
+    margin-bottom: 16px;
+    text-transform: uppercase;
+  }
+  section.quickstart h2 {
+    font-family: var(--serif);
+    font-weight: 900;
+    font-size: clamp(32px, 4vw, 48px);
+    line-height: 1.15;
+    margin-bottom: 20px;
+    letter-spacing: -0.01em;
+  }
+  section.quickstart p.intro {
+    font-size: 16px;
+    line-height: 1.8;
+    color: rgba(244, 239, 227, 0.8);
+    margin-bottom: 40px;
+    max-width: 700px;
+  }
+  .code-window {
+    background: #0a0908;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 2px;
+    margin-bottom: 24px;
+    overflow: hidden;
+  }
+  .code-window .tabbar {
+    background: #1a1714;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .code-window .dots {
+    display: flex;
+    gap: 6px;
+  }
+  .code-window .dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: #555;
+  }
+  .code-window .dots .dot:nth-child(1) { background: #ff5f57; }
+  .code-window .dots .dot:nth-child(2) { background: #febc2e; }
+  .code-window .dots .dot:nth-child(3) { background: #28c840; }
+  .code-window .filename {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: rgba(244, 239, 227, 0.5);
+    margin-left: 12px;
+  }
+  .code-window pre {
+    padding: 20px 22px;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.7;
+    color: #e8e1d0;
+    overflow-x: auto;
+  }
+  .code-window .c { color: #847c67; }
+  .code-window .k { color: #c99a2b; }
+  .code-window .s { color: #c79c80; }
+  .code-window .v { color: #b93c2b; }
+  .code-window .o { color: #7a9e9a; }
+  .step-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ko);
+    letter-spacing: 0.15em;
+    margin: 32px 0 12px;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .step-label::before {
+    content: '';
+    width: 16px;
+    height: 2px;
+    background: var(--ko);
+  }
+
+  /* ========== STATS ========== */
+
+  section.stats {
+    background: var(--paper-2);
+    padding: 80px 28px;
+  }
+  section.stats .inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 40px;
+  }
+  @media (max-width: 760px) {
+    section.stats .inner { grid-template-columns: 1fr 1fr; gap: 32px; }
+  }
+  .stat {
+    text-align: center;
+  }
+  .stat .num {
+    font-family: var(--serif);
+    font-weight: 900;
+    font-size: clamp(40px, 5vw, 60px);
+    line-height: 1;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+  }
+  .stat .num .unit {
+    font-size: 0.5em;
+    color: var(--shu);
+    margin-left: 4px;
+  }
+  .stat .label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    margin-top: 12px;
+    color: var(--ink-soft);
+    text-transform: uppercase;
+  }
+
+  /* ========== HARDWARE ========== */
+
+  section.hardware {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 100px 28px;
+  }
+  section.hardware .section-kicker {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.24em;
+    color: var(--shu);
+    margin-bottom: 16px;
+    text-transform: uppercase;
+  }
+  section.hardware h2 {
+    font-family: var(--serif);
+    font-weight: 900;
+    font-size: clamp(32px, 4vw, 48px);
+    line-height: 1.15;
+    margin-bottom: 50px;
+    max-width: 600px;
+  }
+  .hw-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 24px;
+  }
+  .hw-card {
+    border: 1.5px solid var(--ink);
+    padding: 28px 26px;
+    background: var(--paper);
+    position: relative;
+  }
+  .hw-card h3 {
+    font-family: var(--serif);
+    font-weight: 700;
+    font-size: 18px;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .hw-card h3 .part-no {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--shu);
+    letter-spacing: 0.1em;
+    font-weight: 400;
+  }
+  .hw-card .price {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--ink-soft);
+    margin-bottom: 18px;
+  }
+  .hw-card p {
+    font-size: 13.5px;
+    line-height: 1.7;
+    color: var(--ink-soft);
+  }
+
+  /* ========== BEGINNER GUIDE (中学生向け) ========== */
+
+  section.beginner {
+    background: var(--paper-2);
+    padding: 110px 28px;
+    position: relative;
+    overflow: hidden;
+  }
+  section.beginner::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+      repeating-linear-gradient(0deg, transparent 0, transparent 48px, rgba(14, 13, 11, 0.025) 48px, rgba(14, 13, 11, 0.025) 49px);
+    pointer-events: none;
+  }
+  section.beginner .inner {
+    max-width: 1000px;
+    margin: 0 auto;
+    position: relative;
+  }
+  section.beginner .section-kicker {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.24em;
+    color: var(--shu);
+    margin-bottom: 16px;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  section.beginner .section-kicker::before {
+    content: '🎒';
+    font-size: 16px;
+  }
+  section.beginner h2 {
+    font-family: var(--serif);
+    font-weight: 900;
+    font-size: clamp(30px, 4vw, 48px);
+    line-height: 1.2;
+    margin-bottom: 16px;
+    letter-spacing: -0.01em;
+  }
+  section.beginner h2 .em {
+    color: var(--shu);
+  }
+  section.beginner .intro {
+    font-family: var(--serif);
+    font-size: 16px;
+    line-height: 1.85;
+    color: var(--ink-soft);
+    max-width: 700px;
+    margin-bottom: 20px;
+  }
+  section.beginner .meta-info {
+    display: flex;
+    gap: 28px;
+    margin-bottom: 50px;
+    flex-wrap: wrap;
+    padding: 18px 22px;
+    background: var(--paper);
+    border: 1px solid var(--line-soft);
+    border-left: 4px solid var(--shu);
+  }
+  section.beginner .meta-info .item {
+    font-size: 13px;
+    font-family: var(--mono);
+    color: var(--ink-soft);
+  }
+  section.beginner .meta-info .item strong {
+    color: var(--ink);
+    font-weight: 700;
+  }
+
+  /* ステップ一覧 (アコーディオン) */
+  .step-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  details.step-item {
+    background: var(--paper);
+    border: 1.5px solid var(--ink);
+    overflow: hidden;
+    transition: box-shadow 0.2s;
+  }
+  details.step-item[open] {
+    box-shadow: 4px 4px 0 var(--shu);
+  }
+  details.step-item summary {
+    padding: 22px 26px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    list-style: none;
+    transition: background 0.15s;
+  }
+  details.step-item summary::-webkit-details-marker { display: none; }
+  details.step-item summary:hover { background: rgba(185, 60, 43, 0.04); }
+
+  details.step-item summary .step-num {
+    font-family: var(--serif);
+    font-weight: 900;
+    font-size: 42px;
+    line-height: 1;
+    color: var(--shu);
+    min-width: 64px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  details.step-item summary .step-title {
+    flex: 1;
+  }
+  details.step-item summary .step-title h3 {
+    font-family: var(--serif);
+    font-weight: 700;
+    font-size: 20px;
+    margin-bottom: 4px;
+    line-height: 1.3;
+  }
+  details.step-item summary .step-title .step-meta {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-soft);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  details.step-item summary .chevron {
+    font-family: var(--mono);
+    font-size: 18px;
+    color: var(--ink-soft);
+    transition: transform 0.2s;
+    flex-shrink: 0;
+  }
+  details.step-item[open] summary .chevron {
+    transform: rotate(90deg);
+    color: var(--shu);
+  }
+  details.step-item .step-body {
+    padding: 0 26px 28px 110px;
+    border-top: 1px dashed var(--line-soft);
+    padding-top: 24px;
+  }
+  @media (max-width: 640px) {
+    details.step-item summary { padding: 18px 20px; gap: 14px; }
+    details.step-item summary .step-num { font-size: 32px; min-width: 40px; }
+    details.step-item summary .step-title h3 { font-size: 16px; }
+    details.step-item .step-body { padding: 20px 20px 24px; }
+  }
+  details.step-item .step-body h4 {
+    font-family: var(--serif);
+    font-weight: 700;
+    font-size: 16px;
+    margin: 22px 0 10px;
+    color: var(--ink);
+  }
+  details.step-item .step-body h4:first-child { margin-top: 0; }
+  details.step-item .step-body p {
+    font-size: 14.5px;
+    line-height: 1.85;
+    color: var(--ink-soft);
+    margin-bottom: 12px;
+  }
+  details.step-item .step-body ul,
+  details.step-item .step-body ol {
+    font-size: 14.5px;
+    line-height: 1.85;
+    color: var(--ink-soft);
+    margin-bottom: 12px;
+    padding-left: 20px;
+  }
+  details.step-item .step-body li { margin-bottom: 6px; }
+  details.step-item .step-body code {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    background: var(--paper-2);
+    padding: 1px 6px;
+    border-radius: 2px;
+    color: var(--shu-dark);
+  }
+  details.step-item .step-body a {
+    color: var(--shu);
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+  }
+  details.step-item .step-body a:hover { color: var(--shu-dark); }
+  details.step-item .step-body .note {
+    background: rgba(201, 154, 43, 0.08);
+    border-left: 3px solid var(--ko);
+    padding: 12px 16px;
+    margin: 14px 0;
+    font-size: 13.5px;
+    line-height: 1.75;
+  }
+  details.step-item .step-body .warn {
+    background: rgba(185, 60, 43, 0.08);
+    border-left: 3px solid var(--shu);
+    padding: 12px 16px;
+    margin: 14px 0;
+    font-size: 13.5px;
+    line-height: 1.75;
+  }
+  details.step-item .step-body .warn strong,
+  details.step-item .step-body .note strong {
+    display: block;
+    font-weight: 700;
+    margin-bottom: 4px;
+    color: var(--ink);
+  }
+  details.step-item .step-body .mini-code {
+    background: #0a0908;
+    color: #e8e1d0;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.75;
+    padding: 14px 18px;
+    margin: 12px 0;
+    overflow-x: auto;
+    border-radius: 2px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  details.step-item .step-body .mini-code .c { color: #847c67; }
+  details.step-item .step-body .mini-code .k { color: #c99a2b; }
+  details.step-item .step-body .mini-code .s { color: #c79c80; }
+  details.step-item .step-body .mini-code .v { color: #b93c2b; }
+  details.step-item .step-body table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0;
+    font-size: 13px;
+  }
+  details.step-item .step-body table th,
+  details.step-item .step-body table td {
+    border: 1px solid var(--line-soft);
+    padding: 8px 12px;
+    text-align: left;
+    vertical-align: top;
+  }
+  details.step-item .step-body table th {
+    background: var(--paper-2);
+    font-weight: 700;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+  details.step-item .step-body table td code {
+    background: transparent;
+    padding: 0;
+    color: var(--ink);
+  }
+
+  /* エキスパンド/コラプス ボタン */
+  .expand-controls {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .expand-controls button {
+    background: transparent;
+    border: 1px solid var(--ink);
+    padding: 8px 16px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink);
+    cursor: pointer;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    transition: background 0.15s, color 0.15s;
+  }
+  .expand-controls button:hover {
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  /* ============ TROUBLE SECTION ============ */
+
+  .trouble-box {
+    margin-top: 60px;
+    background: var(--ink);
+    color: var(--paper);
+    padding: 40px 36px;
+    position: relative;
+  }
+  .trouble-box h3 {
+    font-family: var(--serif);
+    font-weight: 900;
+    font-size: 26px;
+    margin-bottom: 12px;
+  }
+  .trouble-box .intro-line {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ko);
+    letter-spacing: 0.15em;
+    margin-bottom: 24px;
+    text-transform: uppercase;
+  }
+  .trouble-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+  }
+  @media (max-width: 720px) {
+    .trouble-grid { grid-template-columns: 1fr; }
+  }
+  .trouble-item {
+    padding: 16px 18px;
+    background: rgba(255, 255, 255, 0.04);
+    border-left: 3px solid var(--shu);
+    font-size: 13.5px;
+    line-height: 1.65;
+  }
+  .trouble-item strong {
+    display: block;
+    color: var(--ko);
+    font-weight: 700;
+    margin-bottom: 6px;
+    font-family: var(--serif);
+    font-size: 15px;
+  }
+  .trouble-item span {
+    color: rgba(244, 239, 227, 0.85);
+  }
+
+  /* ========== FOOTER / CTA ========== */
+
+  section.final-cta {
+    background: var(--shu);
+    color: var(--paper);
+    padding: 100px 28px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  section.final-cta::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+      repeating-linear-gradient(45deg, transparent 0, transparent 24px, rgba(244, 239, 227, 0.03) 24px, rgba(244, 239, 227, 0.03) 25px);
+    pointer-events: none;
+  }
+  section.final-cta .inner {
+    max-width: 800px;
+    margin: 0 auto;
+    position: relative;
+  }
+  section.final-cta h2 {
+    font-family: var(--serif);
+    font-weight: 900;
+    font-size: clamp(32px, 4.5vw, 52px);
+    line-height: 1.2;
+    margin-bottom: 20px;
+    letter-spacing: -0.01em;
+  }
+  section.final-cta p {
+    font-size: 16px;
+    line-height: 1.8;
+    margin-bottom: 36px;
+    color: rgba(244, 239, 227, 0.9);
+  }
+  section.final-cta .btn-primary {
+    background: var(--paper);
+    color: var(--shu);
+    border-color: var(--paper);
+  }
+  section.final-cta .btn-primary:hover {
+    box-shadow: 4px 4px 0 var(--ink);
+  }
+
+  footer {
+    background: var(--ink);
+    color: rgba(244, 239, 227, 0.7);
+    padding: 60px 28px 40px;
+    font-size: 13px;
+    line-height: 1.8;
+  }
+  footer .inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr;
+    gap: 50px;
+  }
+  @media (max-width: 720px) {
+    footer .inner { grid-template-columns: 1fr; gap: 32px; }
+  }
+  footer h4 {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ko);
+    letter-spacing: 0.2em;
+    margin-bottom: 16px;
+    text-transform: uppercase;
+  }
+  footer a { color: var(--paper); text-decoration: none; }
+  footer a:hover { color: var(--ko); text-decoration: underline; }
+  footer ul { list-style: none; }
+  footer li { margin-bottom: 8px; }
+  footer .brand-line {
+    font-family: var(--serif);
+    font-size: 20px;
+    color: var(--paper);
+    font-weight: 700;
+    margin-bottom: 12px;
+  }
+  footer .copyright {
+    max-width: 1200px;
+    margin: 40px auto 0;
+    padding-top: 24px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    font-family: var(--mono);
+    font-size: 11px;
+    opacity: 0.5;
+    letter-spacing: 0.05em;
+  }
+
+  /* ========== アニメーション ========== */
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .fade-up {
+    animation: fadeUp 0.8s ease forwards;
+    opacity: 0;
+  }
+  .fade-up.d1 { animation-delay: 0.1s; }
+  .fade-up.d2 { animation-delay: 0.25s; }
+  .fade-up.d3 { animation-delay: 0.4s; }
+  .fade-up.d4 { animation-delay: 0.55s; }
+
+  /* ========== utility ========== */
+
+  .mono { font-family: var(--mono); }
+  .mincho { font-family: var(--serif); }
+
+  /* アクセシビリティ */
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0s !important; transition-duration: 0s !important; }
+    html { scroll-behavior: auto; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============== NAV ============== -->
+<nav class="topbar">
+  <div class="inner">
+    <div class="brand">
+      <div class="seal">匿</div>
+      <span>yamato-printer-mcp</span>
+    </div>
+    <div class="links">
+      <a href="#features">Features</a>
+      <a href="#flow">How it works</a>
+      <a href="#quickstart">Quickstart</a>
+      <a href="#beginner">初心者ガイド</a>
+      <a href="https://github.com/DaisukeHori/yamato-printer-mcp-server">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ============== HERO ============== -->
+<header class="hero">
+  <div class="kicker fade-up">
+    <span>Unofficial / Open Source / MCP Server</span>
+  </div>
+
+  <h1 class="fade-up d1">
+    送り状印刷を、<br>
+    <span class="accent">Claude から</span>ひとつのコマンドで。
+  </h1>
+
+  <p class="lead fade-up d2">
+    ヤマトB2クラウドで発行した送り状PDFを、小さなRaspberry Piに繋いだサーマルプリンタへ直接流し込むMCPサーバー。デスクの上で、ラベルだけが、静かに流れ出す。
+  </p>
+  <p class="lead-en fade-up d3">
+    // print shipping labels from Claude.ai to your WS-420B thermal printer,<br>
+    // hosted on a 10-gram Raspberry Pi Zero 2 W with WiFi.
+  </p>
+
+  <div class="hero-cta fade-up d4">
+    <a href="#quickstart" class="btn btn-primary">
+      <span>はじめかた</span>
+      <span>→</span>
+    </a>
+    <a href="https://github.com/DaisukeHori/yamato-printer-mcp-server" class="btn btn-secondary">
+      <span>⬚</span>
+      <span>View on GitHub</span>
+    </a>
+  </div>
+</header>
+
+<!-- ============== UNOFFICIAL BANNER ============== -->
+<div class="unofficial-banner">
+  <div class="box">
+    <div class="icon">!</div>
+    <div>
+      <strong>非公式プロジェクト (Unofficial)</strong> — このソフトウェアはヤマト運輸株式会社およびヤマトホールディングス株式会社とは一切関係がありません。"YAMATO"、"ヤマト"、"クロネコ"、"宅急便"、"B2クラウド"はヤマトホールディングス株式会社またはその関連会社の商標または登録商標です。本プロジェクトは、自分で入手した送り状PDFを自分のプリンタで印刷するための汎用ユーティリティです。
+    </div>
+  </div>
+</div>
+
+<!-- ============== ASCII DIVIDER ============== -->
+<div class="ascii-divider">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</div>
+
+<!-- ============== RECEIPT / MOCKUP + PITCH ============== -->
+<section class="receipt-section">
+  <div class="receipt">
+    <div class="status-stamp">OK</div>
+    <div class="hdr">
+      <div class="hdr-big">宅急便 ヤマト運輸</div>
+      <div class="hdr-sm">SLIP-TYPE-230 / 17.8×10.8cm</div>
+    </div>
+    <div class="row"><strong>FROM:</strong><span>東京 品川区</span></div>
+    <div class="row"><strong>TO:</strong><span>埼玉 川口市</span></div>
+    <div class="row"><strong>SIZE:</strong><span>60サイズ</span></div>
+    <div class="row"><strong>COOL:</strong><span>—</span></div>
+    <div class="row"><strong>COD:</strong><span>—</span></div>
+    <div class="row"><strong>DATE:</strong><span>2026-04-16</span></div>
+    <div class="row"><strong>JOB:</strong><span>job_af3b21</span></div>
+    <div class="barcode">**1234567890**</div>
+    <div class="barcode-text">1234-5678-9012</div>
+  </div>
+
+  <div class="hero-text-right">
+    <h2>"この送り状、印刷しといて"<br>と頼むだけ。</h2>
+    <p>
+      Claude.ai に接続した MCP サーバーが、PDFをラスタライズし、ディザ処理で1bit化し、TSPL言語に変換し、USBプリンタに直接書き込みます。業務系の"印刷ボタン"を押す手間が、会話ひとつに置き換わります。
+    </p>
+    <p>
+      対応送り状は <strong>宅急便(230)・コレクト(241)・タイムサービス(203)・ネコポス・クロネコゆうパケット・クロネコゆうメール</strong> の6種類。カスタムサイズも指定可能。
+    </p>
+    <div class="meta-line">/ 10-gram device. Zero port forwarding. Full open source.</div>
+  </div>
+</section>
+
+<!-- ============== STATS ============== -->
+<section class="stats">
+  <div class="inner">
+    <div class="stat">
+      <div class="num">203<span class="unit">tests</span></div>
+      <div class="label">All passing</div>
+    </div>
+    <div class="stat">
+      <div class="num">88<span class="unit">%</span></div>
+      <div class="label">Line coverage</div>
+    </div>
+    <div class="stat">
+      <div class="num">7<span class="unit">tools</span></div>
+      <div class="label">MCP tools</div>
+    </div>
+    <div class="stat">
+      <div class="num">10<span class="unit">g</span></div>
+      <div class="label">Pi Zero 2 W</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============== FEATURES ============== -->
+<section class="features" id="features">
+  <div class="inner">
+    <div class="section-kicker">// 01 &nbsp;&nbsp; MCP Tools</div>
+    <h2>Claude から呼べる<br><span class="em">7 つの機能</span>。</h2>
+
+    <div class="tools-grid">
+      <div class="tool">
+        <div class="index">MCP / 01</div>
+        <h3>print_uploaded</h3>
+        <div class="jp">アップロード済みを印刷</div>
+        <p>/upload エンドポイントに送信済みの PDF を file_id 指定で印刷します。B2クラウドからDLしたファイルをそのまま食わせる、いちばんシンプルな流れ。</p>
+      </div>
+      <div class="tool">
+        <div class="index">MCP / 02</div>
+        <h3>print_url</h3>
+        <div class="jp">任意URLから印刷</div>
+        <p>S3 presigned URL、Cloudflare R2、公開URLから直接取得して印刷。業務システムが生成したPDFをストレージに置くだけで連携可能。</p>
+      </div>
+      <div class="tool">
+        <div class="index">MCP / 03</div>
+        <h3>list_uploads</h3>
+        <div class="jp">アップロード一覧</div>
+        <p>現在サーバーに残っているアップロード済みPDFを一覧表示。TTL 30分で自動削除されるので溜まっていきません。</p>
+      </div>
+      <div class="tool">
+        <div class="index">MCP / 04</div>
+        <h3>list_jobs</h3>
+        <div class="jp">印刷ジョブ履歴</div>
+        <p>過去の印刷ジョブをSQLiteから取得。ファイル名・送り状種別・ステータス・バイト数・時刻すべて記録。</p>
+      </div>
+      <div class="tool">
+        <div class="index">MCP / 05</div>
+        <h3>get_job_status</h3>
+        <div class="jp">状態問い合わせ</div>
+        <p>特定ジョブの状態とエラー内容を取得。completed/failed/printing いずれの場合も詳細が返ります。</p>
+      </div>
+      <div class="tool">
+        <div class="index">MCP / 06</div>
+        <h3>validate_print_options</h3>
+        <div class="jp">事前検証</div>
+        <p>実印刷前に slip_type やカスタムサイズの妥当性、プリンタデバイスのアクセス可否を検査。ドライランに最適。</p>
+      </div>
+      <div class="tool">
+        <div class="index">MCP / 07</div>
+        <h3>list_slip_types</h3>
+        <div class="jp">送り状種別一覧</div>
+        <p>サポートする送り状プリセットと用紙サイズ、使い方の例を返します。未対応品番のリクエストを防ぐ。</p>
+      </div>
+      <div class="tool" style="background: var(--shu-dark);">
+        <div class="index" style="color: var(--paper);">CORE PIPELINE</div>
+        <h3 style="color: var(--paper);">pdf → TSPL</h3>
+        <div class="jp" style="color: rgba(244, 239, 227, 0.9);">変換パイプライン</div>
+        <p style="color: rgba(244, 239, 227, 0.8);">PyMuPDFではなく Node.js の pdf-to-img + sharp で1bitディザ化 → 自前のBITMAPパッキング → TSPL出力。Pi Zero 2 Wでも数秒以内。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============== FLOW / HOW IT WORKS ============== -->
+<section class="flow" id="flow">
+  <div class="section-kicker">// 02 &nbsp;&nbsp; How it works</div>
+  <h2>4ステップで印刷される<br>仕組み。</h2>
+
+  <div class="flow-diagram">
+    <div class="step">
+      <div class="num">01</div>
+      <div class="content">
+        <div class="badge">Upload</div>
+        <h3>PDFをアップロード</h3>
+        <p>curl で /upload に POST。サーバーは file_id を返し、/tmp に30分保持します。</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="num">02</div>
+      <div class="content">
+        <div class="badge">MCP Call</div>
+        <h3>print_uploaded 呼び出し</h3>
+        <p>Claude から file_id と slip_type を指定。Cloudflare Tunnel 経由で MCP サーバーへ到達。</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="num">03</div>
+      <div class="content">
+        <div class="badge">Convert</div>
+        <h3>PDF → TSPL</h3>
+        <p>ラスタライズ → リサイズ → 1bitディザ → MSBファースト パッキング → TSPL BITMAPコマンド生成。</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="num">04</div>
+      <div class="content">
+        <div class="badge">Print</div>
+        <h3>/dev/usb/lp0 へ</h3>
+        <p>Linuxカーネルのusblpドライバ経由で直接書き込み。WS-420Bが数秒でラベルを吐き出します。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============== QUICKSTART ============== -->
+<section class="quickstart" id="quickstart">
+  <div class="inner">
+    <div class="section-kicker">// 03 &nbsp;&nbsp; Quick start</div>
+    <h2>3分で動かす。</h2>
+    <p class="intro">
+      Raspberry Pi Zero 2 W + WS-420B が手元にある前提で、セットアップは以下の3ステップ。中学生でも作れるよう<a href="https://github.com/DaisukeHori/yamato-printer-mcp-server/blob/main/docs/SETUP_GUIDE.md" style="color: var(--ko);">さらに詳しいガイド</a>も用意しています。
+    </p>
+
+    <div class="step-label">STEP 01 / Clone and setup</div>
+    <div class="code-window">
+      <div class="tabbar">
+        <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+        <div class="filename">pi@raspberrypi:~</div>
+      </div>
+<pre><span class="c"># リポジトリをクローン</span>
+<span class="k">git</span> clone https://github.com/DaisukeHori/yamato-printer-mcp-server.git
+<span class="k">cd</span> yamato-printer-mcp-server
+
+<span class="c"># セットアップスクリプト実行 (Node.js/依存/systemd/cloudflared 全部込み)</span>
+<span class="k">sudo</span> ./scripts/setup-pi.sh --longevity</pre>
+    </div>
+
+    <div class="step-label">STEP 02 / Cloudflare Tunnel 設定</div>
+    <div class="code-window">
+      <div class="tabbar">
+        <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+        <div class="filename">cloudflared setup</div>
+      </div>
+<pre>cloudflared tunnel login
+cloudflared tunnel create yamato-printer
+<span class="k">cp</span> cloudflared/config.yml.example ~/.cloudflared/config.yml
+<span class="c"># config.yml のTUNNEL-UUIDを書き換え</span>
+cloudflared tunnel route dns yamato-printer <span class="s">yamato-printer.yourdomain.com</span>
+<span class="k">sudo</span> systemctl enable --now cloudflared</pre>
+    </div>
+
+    <div class="step-label">STEP 03 / Claude.ai に接続</div>
+    <div class="code-window">
+      <div class="tabbar">
+        <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+        <div class="filename">Claude.ai / Settings → Connectors</div>
+      </div>
+<pre><span class="c"># URL を登録するだけ</span>
+<span class="v">https</span>://<span class="s">yamato-printer.yourdomain.com</span>/mcp?<span class="o">key=</span>&lt;MCP_API_KEY&gt;
+
+<span class="c"># 使ってみる (Claude との会話内で)</span>
+"この送り状PDFを印刷して" <span class="c">(PDFファイル添付)</span>
+→ print_uploaded が呼ばれ、数秒でラベルが出力される</pre>
+    </div>
+  </div>
+</section>
+
+<!-- ============== HARDWARE ============== -->
+<section class="hardware" id="hardware">
+  <div class="section-kicker">// 04 &nbsp;&nbsp; Hardware</div>
+  <h2>必要なもの<br>(総額 1万円前後)。</h2>
+
+  <div class="hw-grid">
+    <div class="hw-card">
+      <h3>Raspberry Pi Zero 2 W <span class="part-no">RPI-0-2-W</span></h3>
+      <div class="price">¥2,500 - ¥3,500</div>
+      <p>クアッドコア Cortex-A53 (1GHz) + 512MB RAM + WiFi 2.4GHz内蔵。サイズ 65×30mm、10グラム。スイッチサイエンス等で購入可能。</p>
+    </div>
+    <div class="hw-card">
+      <h3>WS-420B サーマルプリンタ <span class="part-no">TSPL-compat</span></h3>
+      <div class="price">¥8,000 - ¥12,000</div>
+      <p>和信テック製 (XprinterのOEM)。USB接続でTSPL/EPL/ZPL対応。203dpi、最大幅108mmでヤマト送り状にピッタリ。</p>
+    </div>
+    <div class="hw-card">
+      <h3>microSDカード <span class="part-no">High Endurance</span></h3>
+      <div class="price">¥1,500 - ¥3,000</div>
+      <p>防犯カメラ・ドラレコ用の高耐久 (32GB〜64GB推奨)。24時間365日稼働に耐えるモデルを選ぶと長寿命。</p>
+    </div>
+    <div class="hw-card">
+      <h3>電源 (5V/2.5A) <span class="part-no">Micro-USB</span></h3>
+      <div class="price">¥500 - ¥1,000</div>
+      <p>Micro USB の電源アダプタ。データポートは別USBなので、AC/USBから給電すればよい。</p>
+    </div>
+    <div class="hw-card">
+      <h3>USB OTG ケーブル <span class="part-no">Micro-B→A</span></h3>
+      <div class="price">¥300 - ¥800</div>
+      <p>Pi Zero のMicro USB データポートとプリンタのUSB-Aを繋ぐためのOTG変換。100円ショップでも入手可。</p>
+    </div>
+    <div class="hw-card">
+      <h3>ヤマト送り状ロール <span class="part-no">#230 / #10230004</span></h3>
+      <div class="price">ヤマトから無料受領</div>
+      <p>ヤマトビジネスメンバーズに加入すれば、プリンタ対応の送り状ロールが無料で届きます。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============== BEGINNER GUIDE (中学生向け) ============== -->
+<section class="beginner" id="beginner">
+  <div class="inner">
+    <div class="section-kicker">Step-by-step / Absolute beginners welcome</div>
+    <h2>中学生でもできる<br><span class="em">超詳細ガイド</span>。</h2>
+    <p class="intro">
+      プログラミングもLinuxもやったことない人 を対象にしたガイド。書いてある通りに順番にコピペしていけば、誰でもAIから送り状が印刷できる環境が完成します。各ステップをクリックすると詳細が展開されます。
+    </p>
+
+    <div class="meta-info">
+      <div class="item"><strong>所要時間:</strong> 初回 2〜3時間 / 2回目以降 30分</div>
+      <div class="item"><strong>予算:</strong> 約13,000円〜18,000円</div>
+      <div class="item"><strong>前提知識:</strong> なし</div>
+    </div>
+
+    <div class="expand-controls">
+      <button id="expand-all" type="button">すべて展開</button>
+      <button id="collapse-all" type="button">すべて閉じる</button>
+    </div>
+
+    <div class="step-list" id="step-list">
+
+      <!-- STEP 0: 買い物 -->
+      <details class="step-item">
+        <summary>
+          <div class="step-num">00</div>
+          <div class="step-title">
+            <h3>買い物リスト</h3>
+            <div class="step-meta">Shopping / 約13,000円〜</div>
+          </div>
+          <div class="chevron">›</div>
+        </summary>
+        <div class="step-body">
+          <h4>絶対に必要なもの</h4>
+          <table>
+            <thead><tr><th>名前</th><th>値段</th><th>何に使う</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Raspberry Pi Zero 2 W</strong></td><td>2,500〜3,500円</td><td>コンピュータ本体</td></tr>
+              <tr><td><strong>microSDカード 32GB (防犯カメラ用)</strong></td><td>1,500〜2,000円</td><td>OSを入れる</td></tr>
+              <tr><td><strong>Micro USB 電源 5V/2.5A</strong></td><td>500〜1,000円</td><td>電気をあげる</td></tr>
+              <tr><td><strong>Micro USB ⇔ USB-A OTGケーブル</strong></td><td>300〜800円</td><td>プリンタ接続</td></tr>
+              <tr><td><strong>WS-420B サーマルプリンタ</strong></td><td>8,000〜12,000円</td><td>印字する装置</td></tr>
+              <tr><td><strong>送り状ロール紙</strong></td><td>無料</td><td>印刷する紙(ヤマトビジネスメンバーズから取得)</td></tr>
+            </tbody>
+          </table>
+          <div class="note">
+            <strong>どこで買う?</strong>
+            Raspberry Pi は <a href="https://www.switch-science.com/" target="_blank">スイッチサイエンス</a>・<a href="https://akizukidenshi.com/" target="_blank">秋月電子</a> が確実。プリンタとOTGケーブルはAmazonで。SDカードは家電量販店でもOK。
+          </div>
+        </div>
+      </details>
+
+      <!-- STEP 1: OS書き込み -->
+      <details class="step-item">
+        <summary>
+          <div class="step-num">01</div>
+          <div class="step-title">
+            <h3>microSDカードに OS を書き込む</h3>
+            <div class="step-meta">Install OS / 10〜15分</div>
+          </div>
+          <div class="chevron">›</div>
+        </summary>
+        <div class="step-body">
+          <h4>1-1. Raspberry Pi Imager をダウンロード</h4>
+          <p>
+            専用アプリをダウンロード → <a href="https://www.raspberrypi.com/software/" target="_blank">https://www.raspberrypi.com/software/</a>
+          </p>
+          <p>自分のPCに合わせて選んでインストール:</p>
+          <ul>
+            <li><strong>Mac</strong>: "Download for macOS"</li>
+            <li><strong>Windows</strong>: "Download for Windows"</li>
+            <li><strong>Linux</strong>: apt または dnf でインストール</li>
+          </ul>
+
+          <h4>1-2. microSDカードをPCに挿す</h4>
+          <div class="warn">
+            <strong>⚠️ 注意</strong>
+            microSDの中身は書き込むと全部消えます。大事なデータがあれば先にバックアップを。
+          </div>
+
+          <h4>1-3〜1-6. Raspberry Pi Imager で選択</h4>
+          <ol>
+            <li>「<strong>CHOOSE DEVICE</strong>」→ <code>Raspberry Pi Zero 2 W</code></li>
+            <li>「<strong>CHOOSE OS</strong>」→ <code>Raspberry Pi OS (other)</code> → <code>Raspberry Pi OS Lite (64-bit)</code></li>
+            <li>「<strong>CHOOSE STORAGE</strong>」→ 挿した microSDカード</li>
+          </ol>
+          <div class="note">
+            <strong>💡 なぜ "Lite" ?</strong>
+            Lite版は画面(デスクトップ)がない軽量OS。Pi Zero 2 W はメモリが512MBしかないので、Liteでないと重くて動きません。
+          </div>
+
+          <h4>1-7〜1-8. カスタマイズ (EDIT SETTINGS)</h4>
+          <p>「NEXT」→ 必ず「<strong>EDIT SETTINGS</strong>」をクリック。</p>
+          <p><strong>GENERAL タブ:</strong></p>
+          <table>
+            <tbody>
+              <tr><td><strong>Set hostname</strong></td><td><code>yamato-printer</code></td></tr>
+              <tr><td><strong>Username</strong></td><td><code>pi</code></td></tr>
+              <tr><td><strong>Password</strong></td><td>覚えやすいパスワード(8文字以上)</td></tr>
+              <tr><td><strong>SSID</strong></td><td>家のWiFiの名前</td></tr>
+              <tr><td><strong>WiFi Password</strong></td><td>家のWiFiパスワード</td></tr>
+              <tr><td><strong>Wireless LAN country</strong></td><td><code>JP</code></td></tr>
+              <tr><td><strong>Time zone</strong></td><td><code>Asia/Tokyo</code></td></tr>
+            </tbody>
+          </table>
+          <p><strong>SERVICES タブ:</strong> <code>Enable SSH</code> にチェック → "Use password authentication" を選択</p>
+
+          <h4>1-9. 書き込み</h4>
+          <p>「SAVE」→ "Would you like to apply..." で「YES」→ 警告で「YES」→ 5〜10分待つ。<br>「Write Successful」が出たら完了。SDカードを取り出します。</p>
+        </div>
+      </details>
+
+      <!-- STEP 2: 電源投入 -->
+      <details class="step-item">
+        <summary>
+          <div class="step-num">02</div>
+          <div class="step-title">
+            <h3>電源を入れて接続確認</h3>
+            <div class="step-meta">Power-on / 5分</div>
+          </div>
+          <div class="chevron">›</div>
+        </summary>
+        <div class="step-body">
+          <h4>2-1. microSDをRaspberry Piに挿す</h4>
+          <p>本体の<strong>裏側</strong>にスロットがあります。<strong>金属端子が見える側を上</strong>にして、カチッと音がするまで押し込みます。</p>
+
+          <h4>2-2. 電源を繋ぐ</h4>
+          <p>Raspberry Pi Zero 2 W には Micro USBポートが2つあります:</p>
+          <div class="mini-code">
+  [HDMI] [USB DATA] [USB POWER]
+    <span class="c">↑        ↑          ↑</span>
+  <span class="c">使わない ← 左    右 → 電源</span>
+          </div>
+          <div class="warn">
+            <strong>⚠️ 右側の「USB POWER」に挿す!</strong>
+            左側は STEP 5 でプリンタを繋ぐためのデータポートなので、間違えないこと。
+          </div>
+
+          <h4>2-3. 起動を待つ</h4>
+          <p>緑色のLEDが点滅します。<strong>初回起動は3〜5分</strong>。気長に待ちましょう。</p>
+        </div>
+      </details>
+
+      <!-- STEP 3: SSH接続 -->
+      <details class="step-item">
+        <summary>
+          <div class="step-num">03</div>
+          <div class="step-title">
+            <h3>SSH で Raspberry Pi に接続</h3>
+            <div class="step-meta">SSH / 5分</div>
+          </div>
+          <div class="chevron">›</div>
+        </summary>
+        <div class="step-body">
+          <h4>3-1. IPアドレスを調べる</h4>
+          <p>自分のPCから「おーい、どこー?」と呼びかけます。</p>
+          <p><strong>Mac / Linux</strong> ターミナルで:</p>
+          <div class="mini-code">ping yamato-printer.local</div>
+          <p><strong>Windows</strong> コマンドプロンプトで同じく:</p>
+          <div class="mini-code">ping yamato-printer.local</div>
+          <p>返事が来たらIPアドレス (<code>192.168.x.x</code>) をメモ。Ctrl+Cで停止。</p>
+
+          <h4>3-2. SSH接続</h4>
+          <div class="mini-code">ssh pi@yamato-printer.local</div>
+          <p>初回は <code>yes</code> → パスワード入力(STEP 1-8 で決めたもの)。<strong>打ち込んだ文字は画面に表示されない</strong>が、打てています。</p>
+          <p>成功すると:</p>
+          <div class="mini-code">pi@yamato-printer:~ $</div>
+          <p>これが Linux のコマンド画面。ここから全部この画面で作業します。</p>
+
+          <div class="note">
+            <strong>💡 SSHって?</strong>
+            「離れた場所にあるコンピュータに遠隔ログインする仕組み」。画面もキーボードもRaspberry Piには繋がないので、自分のPCから操作します。
+          </div>
+        </div>
+      </details>
+
+      <!-- STEP 4: プロジェクトインストール -->
+      <details class="step-item">
+        <summary>
+          <div class="step-num">04</div>
+          <div class="step-title">
+            <h3>このプロジェクトをインストール</h3>
+            <div class="step-meta">Install / 20〜30分</div>
+          </div>
+          <div class="chevron">›</div>
+        </summary>
+        <div class="step-body">
+          <h4>4-1. 必要な道具を入れる</h4>
+          <div class="mini-code"><span class="k">sudo</span> apt update
+<span class="k">sudo</span> apt install -y git</div>
+
+          <h4>4-2. プロジェクトをダウンロード</h4>
+          <div class="mini-code"><span class="k">cd</span> ~
+git clone https://github.com/DaisukeHori/yamato-printer-mcp-server.git
+<span class="k">cd</span> yamato-printer-mcp-server</div>
+
+          <h4>4-3. セットアップスクリプトを実行</h4>
+          <div class="mini-code"><span class="k">sudo</span> ./scripts/setup-pi.sh --longevity</div>
+          <p><strong>20〜30分</strong>かかります。コーヒー休憩に最適。</p>
+          <div class="note">
+            <strong>💡 --longevity オプション</strong>
+            「microSDカードが長持ちするように設定してね」のオプション。24時間稼働させる予定なら必ず付ける。
+          </div>
+
+          <h4>4-4. MCP_API_KEY をメモする</h4>
+          <p>完了画面の中に <code>MCP_API_KEY を自動生成しました: ...</code> が出ます。<strong>この ... の部分をメモ</strong>。あとでClaude.aiの設定で使います。</p>
+          <p>見逃したら:</p>
+          <div class="mini-code">grep MCP_API_KEY ~/yamato-printer-mcp-server/.env</div>
+
+          <h4>4-5. 再起動</h4>
+          <div class="mini-code"><span class="k">sudo</span> reboot</div>
+          <p>SSH接続が切れるので、1〜2分後に再接続:</p>
+          <div class="mini-code">ssh pi@yamato-printer.local</div>
+        </div>
+      </details>
+
+      <!-- STEP 5: プリンタ接続 -->
+      <details class="step-item">
+        <summary>
+          <div class="step-num">05</div>
+          <div class="step-title">
+            <h3>プリンタ接続とテスト印刷</h3>
+            <div class="step-meta">Printer setup / 10分</div>
+          </div>
+          <div class="chevron">›</div>
+        </summary>
+        <div class="step-body">
+          <h4>5-1. プリンタを準備</h4>
+          <p>WS-420B の電源ケーブルをコンセントに挿して電源ON。ロール紙をセット(プリンタ付属説明書に従う)。</p>
+
+          <h4>5-2. プリンタとRaspberry Piを繋ぐ</h4>
+          <p>OTGケーブルを使って:</p>
+          <ul>
+            <li>プリンタのUSBケーブル(USB-A) → OTGケーブルのメス端子</li>
+            <li>OTGケーブルのMicro USB → Raspberry Piの<strong>左側 "USB DATA"</strong></li>
+          </ul>
+          <div class="warn">
+            <strong>⚠️ 間違えないで!</strong>
+            STEP 2 で電源を繋いだのは右側(POWER)。プリンタを繋ぐのは<strong>左側(DATA)</strong>。
+          </div>
+
+          <h4>5-3. 認識確認</h4>
+          <div class="mini-code">dmesg | tail -10</div>
+          <p>以下のような行が出ればOK:</p>
+          <div class="mini-code"><span class="c">[XXX.XXX] usblp0: USB Bidirectional printer dev X if 0 alt 0 proto 2 vid 0x... pid 0x...</span></div>
+          <p>「<code>usblp0</code>」が見えたら成功。</p>
+          <div class="mini-code">ls -la /dev/usb/lp0</div>
+
+          <h4>5-4. テスト印刷(ドキドキの初印刷)</h4>
+          <div class="mini-code"><span class="k">cd</span> ~/yamato-printer-mcp-server
+npm run print-sample:test</div>
+          <p><strong>ラベルが1枚出てきたら大成功!</strong>「HELLO WS-420B」と印字されています。</p>
+
+          <h4>5-5. PDF印刷もテスト</h4>
+          <div class="mini-code">npm run print-sample:pdf</div>
+          <p>PDF→TSPL変換パイプライン全体の動作確認ができます。</p>
+        </div>
+      </details>
+
+      <!-- STEP 6: Cloudflare Tunnel -->
+      <details class="step-item">
+        <summary>
+          <div class="step-num">06</div>
+          <div class="step-title">
+            <h3>Cloudflare Tunnel でインターネット公開</h3>
+            <div class="step-meta">Expose to internet / 30分</div>
+          </div>
+          <div class="chevron">›</div>
+        </summary>
+        <div class="step-body">
+          <p>ここまでは家のWiFi内からしか使えません。<strong>Cloudflare Tunnel</strong>で外からもアクセスできるようにします(無料、ルーター設定不要)。</p>
+
+          <h4>6-1. Cloudflare アカウント作成</h4>
+          <p><a href="https://dash.cloudflare.com/sign-up" target="_blank">Cloudflareサインアップ</a> でメール登録 → 確認メールのリンクをクリック。</p>
+
+          <h4>6-2. 独自ドメインを取得</h4>
+          <p>Cloudflare Tunnelには独自ドメインが必要です:</p>
+          <ul>
+            <li><a href="https://www.cloudflare.com/products/registrar/" target="_blank">Cloudflare Registrar</a> (年間1,500円、おすすめ)</li>
+            <li><a href="https://www.onamae.com/" target="_blank">お名前.com</a> (年間1,000〜2,000円)</li>
+            <li><a href="https://domains.google/" target="_blank">Google Domains</a> (年間2,000円)</li>
+          </ul>
+          <p>取得したドメインをCloudflareに登録(Cloudflare公式ガイドに従う)。</p>
+
+          <h4>6-3. Zero Trustダッシュボードでトンネル作成</h4>
+          <ol>
+            <li><a href="https://one.dash.cloudflare.com/" target="_blank">Cloudflare Zero Trust</a> にログイン</li>
+            <li>左メニュー「Networks」→「Tunnels」→「Create a tunnel」</li>
+            <li>Tunnel type: <code>Cloudflared</code> を選択</li>
+            <li>Tunnel name: <code>yamato-printer</code></li>
+            <li>「Save tunnel」をクリック</li>
+          </ol>
+
+          <h4>6-4. cloudflared のトークン認証 (Pi側)</h4>
+          <p>Cloudflare画面に表示されるコマンドをSSH画面で実行:</p>
+          <div class="mini-code"><span class="k">sudo</span> cloudflared service install eyJhIjoiXXX...</div>
+          <p>(<code>eyJh...</code>の部分はCloudflare画面のトークンに置き換え)</p>
+
+          <h4>6-5. ドメインとトンネルの紐付け</h4>
+          <p>Cloudflare画面で「Next」→ Public Hostname設定:</p>
+          <table>
+            <tbody>
+              <tr><td><strong>Subdomain</strong></td><td><code>yamato-printer</code></td></tr>
+              <tr><td><strong>Domain</strong></td><td>取得したドメイン</td></tr>
+              <tr><td><strong>Type</strong></td><td><code>HTTP</code></td></tr>
+              <tr><td><strong>URL</strong></td><td><code>localhost:8719</code></td></tr>
+            </tbody>
+          </table>
+
+          <h4>6-6. 動作確認</h4>
+          <p>ブラウザで:</p>
+          <div class="mini-code">https://yamato-printer.<span class="s">あなたのドメイン</span>/health</div>
+          <p>JSONが表示され <code>"available": true</code> ならOK。</p>
+        </div>
+      </details>
+
+      <!-- STEP 7: Claude.ai 接続 -->
+      <details class="step-item">
+        <summary>
+          <div class="step-num">07</div>
+          <div class="step-title">
+            <h3>Claude.ai と繋げる</h3>
+            <div class="step-meta">Connect Claude / 5分</div>
+          </div>
+          <div class="chevron">›</div>
+        </summary>
+        <div class="step-body">
+          <h4>7-1. Claude.ai にログイン</h4>
+          <p><a href="https://claude.ai/" target="_blank">https://claude.ai/</a></p>
+
+          <h4>7-2. 設定画面を開く</h4>
+          <p>右下の自分のアイコン → 「Settings」→「Connectors」→「Add custom connector」</p>
+
+          <h4>7-3. コネクタ情報を入力</h4>
+          <table>
+            <tbody>
+              <tr><td><strong>Name</strong></td><td><code>YamatoPrinter</code></td></tr>
+              <tr><td><strong>URL</strong></td><td><code>https://yamato-printer.ドメイン/mcp?key=XXXXX</code></td></tr>
+            </tbody>
+          </table>
+          <div class="warn">
+            <strong>🔑 MCP_API_KEY</strong>
+            URLの <code>XXXXX</code> を STEP 4-4 でメモした <strong>MCP_API_KEY</strong> に置き換え。
+          </div>
+          <p>例:</p>
+          <div class="mini-code">https://yamato-printer.example.com/mcp?key=<span class="s">a1b2c3d4e5f6g7h8i9j0...</span></div>
+
+          <h4>7-4. 動作確認</h4>
+          <p>Claude.aiの新チャットで「<strong>利用可能なMCPツールを教えて</strong>」と聞いて、<code>print_uploaded</code>、<code>print_url</code>などが出てきたら成功。</p>
+        </div>
+      </details>
+
+      <!-- STEP 8: 実印刷 -->
+      <details class="step-item">
+        <summary>
+          <div class="step-num">08</div>
+          <div class="step-title">
+            <h3>実際に送り状を印刷</h3>
+            <div class="step-meta">First real print / 5分</div>
+          </div>
+          <div class="chevron">›</div>
+        </summary>
+        <div class="step-body">
+          <h4>8-1. ヤマトB2クラウドで送り状PDF作成</h4>
+          <p><a href="https://bmypage.kuronekoyamato.co.jp/" target="_blank">B2クラウド</a>で送り状を作成し、PDFをダウンロード。</p>
+
+          <h4>8-2. Claude.aiにPDFアップロード</h4>
+          <p>Claude.aiチャット画面で<strong>クリップボタン</strong>からPDFをアップロード。</p>
+
+          <h4>8-3. 印刷指示</h4>
+          <div class="mini-code">この送り状PDFを印刷してください。
+宅急便の用紙を使います。</div>
+          <p>Claudeが自動的に <code>print_uploaded</code> を呼び出し、<strong>数秒後にプリンタからラベルが出てきます</strong>。</p>
+
+          <h4>🎉 完成!</h4>
+          <p>お疲れ様でした。これで「AIに話しかけて送り状印刷」が完成です。業務で日常的に使うなら、<code>validate_print_options</code>や<code>list_jobs</code>なども試してみてください。</p>
+        </div>
+      </details>
+
+    </div>
+
+    <!-- ============ TROUBLE SECTION ============ -->
+    <div class="trouble-box">
+      <h3>うまくいかない時の救急箱</h3>
+      <div class="intro-line">// Troubleshooting</div>
+      <div class="trouble-grid">
+        <div class="trouble-item">
+          <strong>ping が通らない</strong>
+          <span>Pi Zero 2 W は 2.4GHz のみ。5GHz に繋ごうとしていないか確認。ルーターのゲストネットワーク設定もチェック。</span>
+        </div>
+        <div class="trouble-item">
+          <strong>SSHでパスワード弾かれる</strong>
+          <span>日本語入力 OFF にして、STEP 1-8 で決めたパスワードを慎重に打つ。ダメなら SDカード書き込みからやり直し。</span>
+        </div>
+        <div class="trouble-item">
+          <strong>setup-pi.sh がエラー</strong>
+          <span>赤色 [ERROR] を読む。<code>Unable to locate package</code> なら <code>sudo apt update</code> を再実行。</span>
+        </div>
+        <div class="trouble-item">
+          <strong>dmesgにusblp出ない</strong>
+          <span>プリンタ電源ON、OTGケーブル確認(Pi左側)、<code>sudo modprobe usblp</code>で手動ロード。</span>
+        </div>
+        <div class="trouble-item">
+          <strong>印刷が真っ黒/真っ白</strong>
+          <span>.env の <code>DITHER_THRESHOLD=128</code> を100や180に調整。ロール紙の裏表確認(熱で黒くなる面が表)。</span>
+        </div>
+        <div class="trouble-item">
+          <strong>Cloudflare Tunnelが繋がらない</strong>
+          <span><code>sudo systemctl status cloudflared</code> で確認。<code>journalctl -u cloudflared -n 50</code> でログを見る。</span>
+        </div>
+        <div class="trouble-item">
+          <strong>Claude.aiでコネクタ見つからない</strong>
+          <span>ブラウザで /health 開いて接続確認。URLの ?key=XXX が .env の MCP_API_KEY と完全一致しているか確認。</span>
+        </div>
+        <div class="trouble-item">
+          <strong>Piが勝手に再起動する</strong>
+          <span>電源が非力(古いスマホ充電器NG)。<strong>5V/2.5A以上</strong>のMicro USB電源を使う。</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============== FINAL CTA ============== -->
+<section class="final-cta">
+  <div class="inner">
+    <h2>さあ、机の上の<br>"印刷ボタン"を消そう。</h2>
+    <p>
+      MIT License. 203件のテストが通過済み。<br>
+      クラスA操作・読取10Mリクエスト・エグレス無料のCloudflare Tunnelでどこからでも到達可能。
+    </p>
+    <a href="https://github.com/DaisukeHori/yamato-printer-mcp-server" class="btn btn-primary">
+      <span>⬚</span>
+      <span>GitHub で見る</span>
+    </a>
+  </div>
+</section>
+
+<!-- ============== FOOTER ============== -->
+<footer>
+  <div class="inner">
+    <div>
+      <div class="brand-line">yamato-printer-mcp-server</div>
+      <p style="max-width: 420px;">Unofficial MCP server for printing Yamato shipping labels on TSPL-based thermal printers. Built on Raspberry Pi Zero 2 W. Not affiliated with Yamato Transport.</p>
+    </div>
+    <div>
+      <h4>Project</h4>
+      <ul>
+        <li><a href="https://github.com/DaisukeHori/yamato-printer-mcp-server">GitHub</a></li>
+        <li><a href="https://github.com/DaisukeHori/yamato-printer-mcp-server/blob/main/README.md">README</a></li>
+        <li><a href="https://github.com/DaisukeHori/yamato-printer-mcp-server/blob/main/DESIGN.md">Design doc</a></li>
+        <li><a href="https://github.com/DaisukeHori/yamato-printer-mcp-server/blob/main/CHANGELOG.md">Changelog</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Guides</h4>
+      <ul>
+        <li><a href="https://github.com/DaisukeHori/yamato-printer-mcp-server/blob/main/docs/SETUP_GUIDE.md">中学生向けガイド</a></li>
+        <li><a href="https://github.com/DaisukeHori/yamato-printer-mcp-server/issues">Issues</a></li>
+        <li><a href="https://github.com/DaisukeHori/yamato-printer-mcp-server/blob/main/CONTRIBUTING.md">Contributing</a></li>
+        <li><a href="https://github.com/DaisukeHori/yamato-printer-mcp-server/blob/main/LICENSE">MIT License</a></li>
+      </ul>
+    </div>
+  </div>
+  <div class="copyright">
+    © 2026 Daisuke Hori. This project is not affiliated with Yamato Transport Co., Ltd. All trademarks belong to their respective owners.
+  </div>
+</footer>
+
+<script>
+  // スクロール時、fade-upを順次発火させる(IntersectionObserverで)
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.style.animationPlayState = 'running';
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.15 });
+
+  document.querySelectorAll('.fade-up').forEach(el => {
+    observer.observe(el);
+  });
+
+  // 初心者ガイドの「すべて展開 / すべて閉じる」
+  const expandAllBtn = document.getElementById('expand-all');
+  const collapseAllBtn = document.getElementById('collapse-all');
+  const allSteps = () => document.querySelectorAll('#step-list details.step-item');
+
+  if (expandAllBtn) {
+    expandAllBtn.addEventListener('click', () => {
+      allSteps().forEach(d => d.setAttribute('open', ''));
+    });
+  }
+  if (collapseAllBtn) {
+    collapseAllBtn.addEventListener('click', () => {
+      allSteps().forEach(d => d.removeAttribute('open'));
+    });
+  }
+
+  // URLハッシュ #step-01 のように来たらそのステップを開く (今は未実装だが将来用)
+</script>
+</body>
+</html>
