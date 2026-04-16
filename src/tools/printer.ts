@@ -44,8 +44,13 @@ const logger = pino({
       : undefined,
 }).child({ component: "mcp-tools" });
 
-const UPLOAD_DIR =
-  process.env.UPLOAD_DIR || "/tmp/yamato-printer-uploads";
+/**
+ * アップロードディレクトリを取得 (関数化で毎回 process.env を参照)
+ * テスト環境で環境変数を動的に切り替えられるようにするため
+ */
+function getUploadDir(): string {
+  return process.env.UPLOAD_DIR || "/tmp/yamato-printer-uploads";
+}
 
 const BLOCKED_CIDRS = (
   process.env.BLOCKED_CIDRS ||
@@ -144,8 +149,10 @@ function errJson(error: string, detail?: unknown) {
  *
  * - http/https 以外のプロトコル拒否
  * - 内部ネットワークのホスト名/IPアドレス拒否
+ *
+ * @public テスト用にexport
  */
-function isBlockedUrl(url: string): string | null {
+export function isBlockedUrl(url: string): string | null {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -157,7 +164,9 @@ function isBlockedUrl(url: string): string | null {
     return `Protocol not allowed: ${parsed.protocol} (only http/https)`;
   }
 
-  const hostname = parsed.hostname;
+  // URL クラスの hostname は IPv6 の場合 "[::1]" のようにブラケット付きで返される。
+  // 比較のためにブラケットを剥がす。
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, "");
 
   // ローカルホスト系のブロック
   const localhostKeywords = [
@@ -165,11 +174,38 @@ function isBlockedUrl(url: string): string | null {
     "127.0.0.1",
     "0.0.0.0",
     "::1",
+    "::",
     "metadata.google.internal", // GCP metadata
     "169.254.169.254", // AWS/Azure metadata
   ];
   if (localhostKeywords.some((k) => hostname.toLowerCase() === k)) {
     return `Hostname blocked (internal): ${hostname}`;
+  }
+
+  // IPv6 のループバック/リンクローカル/ユニークローカル をブロック
+  // - fe80::/10  link-local
+  // - fc00::/7   unique-local (fc** / fd**)
+  // - ::ffff:<hex> の形で IPv4-mapped loopback/private 到達を阻止
+  //   Node.js の URL は IPv4-mapped を hex に正規化する:
+  //     ::ffff:127.0.0.1  → ::ffff:7f00:1
+  //     ::ffff:10.0.0.1   → ::ffff:a00:1
+  //     ::ffff:192.168.x  → ::ffff:c0a8:x
+  //     ::ffff:169.254.x  → ::ffff:a9fe:x
+  const lowered = hostname.toLowerCase();
+  if (
+    lowered.startsWith("fe80:") ||
+    lowered.startsWith("fc") ||
+    lowered.startsWith("fd") ||
+    // IPv4-mapped 127.x.x.x  (loopback)
+    lowered.startsWith("::ffff:7f") ||
+    // IPv4-mapped 192.168.x.x
+    lowered.startsWith("::ffff:c0a8:") ||
+    // IPv4-mapped 169.254.x.x (link-local)
+    lowered.startsWith("::ffff:a9fe:") ||
+    // IPv4-mapped 10.x.x.x : a00:x 〜 aff:x の範囲
+    /^::ffff:[a0]\w*:/.test(lowered)
+  ) {
+    return `Hostname blocked (IPv6 private/loopback): ${hostname}`;
   }
 
   // CIDR判定 (簡易的にプレフィックスマッチ)
@@ -277,7 +313,7 @@ Returns: {"job_id": "job_xxx", "status": "completed", "bytes_sent": N}`,
     },
     async (args) => {
       try {
-        const filePath = join(UPLOAD_DIR, args.file_id);
+        const filePath = join(getUploadDir(), args.file_id);
 
         // ファイル存在確認
         let pdfBuffer: Buffer;
@@ -286,7 +322,7 @@ Returns: {"job_id": "job_xxx", "status": "completed", "bytes_sent": N}`,
         } catch {
           return errJson(
             "file_not_found",
-            `file_id=${args.file_id} not found in ${UPLOAD_DIR}. ` +
+            `file_id=${args.file_id} not found in ${getUploadDir()}. ` +
               `It may have expired (TTL: ${process.env.UPLOAD_TTL_MIN || 30} min) ` +
               `or was never uploaded.`
           );
@@ -456,7 +492,7 @@ Returns: [{"file_id":"abc","filename":"a.pdf","size":N,"uploaded_at":"...","expi
     },
     async () => {
       try {
-        const entries = await fs.readdir(UPLOAD_DIR).catch(() => []);
+        const entries = await fs.readdir(getUploadDir()).catch(() => []);
         const files = entries.filter((f) => !f.endsWith(".meta.json"));
 
         const results: Array<{
@@ -467,7 +503,7 @@ Returns: [{"file_id":"abc","filename":"a.pdf","size":N,"uploaded_at":"...","expi
         }> = [];
 
         for (const f of files) {
-          const filePath = join(UPLOAD_DIR, f);
+          const filePath = join(getUploadDir(), f);
           const stat = await fs.stat(filePath).catch(() => null);
           if (!stat) continue;
 

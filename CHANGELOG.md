@@ -7,6 +7,25 @@
 
 ## [Unreleased]
 
+### 追加
+
+- **自動テストスイート** (vitest + supertest)
+  - 単体テスト 182件: yamato-slips, pdf-to-tspl, auth, job-queue, printer-device, ssrf
+  - 結合テスト 49件: HTTP エンドポイント (/upload/uploads/health/mcp) + MCP JSON-RPC 全ツール
+  - 総計 **203件全通過**
+  - カバレッジ: Lines 88.09%, Branches 71.17%, Functions 100%, Statements 88.09%
+  - GitHub Actions で Node.js 20.x/22.x + ARM64 クロスビルドで自動実行
+- `src/app.ts` にExpress+MCPアプリ組み立てを分離 (テスト可能化)
+- `tests/fixtures/pdf-helper.ts` - 依存なしで最小PDFを生成するヘルパー
+
+### 修正
+
+- `resolveSlipPreset()` : `custom_width_mm=0` を "missing" エラーに誤分類していた (`!0===true` バグ)
+- SSRF ガード: IPv6 ループバック (`::1`, `::`) が未検出だった
+- SSRF ガード: IPv6 link-local (`fe80::/10`), unique-local (`fc00::/7`) 未対応だった
+- SSRF ガード: IPv4-mapped IPv6 (`::ffff:7f00:1` 等) 未対応だった
+- `tools/printer.ts`: `UPLOAD_DIR` がモジュール定数で、テストで環境変数を切り替えても反映されなかった
+
 ### 今後の予定
 
 - TSPLプリンタ状態クエリ (`<STX>E` コマンド) によるリアルタイム状態取得

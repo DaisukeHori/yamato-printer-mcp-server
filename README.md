@@ -156,6 +156,39 @@ Claude: [bash_tool] curl -sF "file=@/mnt/user-data/uploads/shipping_20260416.pdf
 
 詳細は [DESIGN.md](./DESIGN.md) を参照。
 
+## テスト
+
+203件の自動テストが用意されています (単体147件 + 結合49件 + 他7件)。
+
+| 指標 | カバレッジ | 目標 |
+|---|---|---|
+| Statements | 88.09% | 75% |
+| Branches | 71.17% | 70% |
+| Functions | **100%** | 80% |
+| Lines | 88.09% | 75% |
+
+```bash
+npm test                # 全テスト実行
+npm run test:unit       # 単体テストのみ
+npm run test:integration # 結合テストのみ
+npm run test:coverage   # カバレッジ付き
+npm run test:watch      # 監視モード
+```
+
+テスト構成:
+
+- **tests/unit/** (182件)
+  - `yamato-slips.test.ts` — 送り状プリセット・サイズ検証 (33件)
+  - `pdf-to-tspl.test.ts` — PDF→TSPL 変換・TSPLコマンド生成 (32件、実PDF変換含む)
+  - `auth.test.ts` — MCP API Key 認証 (17件)
+  - `job-queue.test.ts` — SQLite ジョブキュー (22件)
+  - `printer-device.test.ts` — /dev/usb/lp0 書き込み (17件)
+  - `ssrf.test.ts` — SSRF ガード IPv4/IPv6/メタデータ (33件)
+
+- **tests/integration/** (49件)
+  - `http-endpoints.test.ts` — /upload, /uploads, /health, /mcp 認証 (25件)
+  - `mcp-tools.test.ts` — MCP JSON-RPC 経由の全ツール呼び出し (24件)
+
 ## アーキテクチャ
 
 ```

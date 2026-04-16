@@ -66,7 +66,10 @@ export const YAMATO_SLIPS: Record<Exclude<SlipType, "custom">, SlipPreset> = {
  */
 export function resolveSlipPreset(options: PrintOptions): SlipPreset {
   if (options.slip_type === "custom") {
-    if (!options.custom_width_mm || !options.custom_height_mm) {
+    if (
+      options.custom_width_mm === undefined ||
+      options.custom_height_mm === undefined
+    ) {
       throw new Error(
         'slip_type="custom" was specified but custom_width_mm or ' +
           "custom_height_mm is missing. Example: " +

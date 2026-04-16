@@ -42,6 +42,20 @@ jobs:
       - name: TypeScript build
         run: npx tsc
 
+      - name: Run tests
+        run: npx vitest run
+
+      - name: Run tests with coverage
+        run: npx vitest run --coverage
+
+      - name: Upload coverage reports
+        if: matrix.node-version == '22.x'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 30
+
       - name: Verify dist/ output
         run: |
           test -f dist/index.js || (echo "dist/index.js missing" && exit 1)

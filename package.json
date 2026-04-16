@@ -16,7 +16,12 @@
     "print-sample:test": "tsx scripts/print-sample.ts --mode test",
     "print-sample:pdf": "tsx scripts/print-sample.ts --mode pdf",
     "print-sample:dither": "tsx scripts/print-sample.ts --mode dither",
-    "test": "echo 'Tests not implemented yet' && exit 0"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:coverage": "vitest run --coverage",
+    "test:ui": "vitest --ui"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -39,9 +44,13 @@
     "@types/express": "^5.0.0",
     "@types/multer": "^1.4.12",
     "@types/node": "^22.10.1",
+    "@types/supertest": "^6.0.3",
     "@types/uuid": "^10.0.0",
+    "@vitest/coverage-v8": "^2.1.9",
+    "supertest": "^7.2.2",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.9"
   },
   "repository": {
     "type": "git",

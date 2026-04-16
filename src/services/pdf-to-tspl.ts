@@ -45,8 +45,10 @@ const DEFAULT_DITHER_METHOD = (process.env.DITHER_METHOD || "threshold") as
  *
  * 203 dpi = 203 dots / 25.4mm = 約 8 dots/mm
  * 用紙幅 108mm = 864 dots
+ *
+ * @public テスト用にexport
  */
-function mmToDots(mm: number): number {
+export function mmToDots(mm: number): number {
   return Math.round((mm * DPI) / 25.4);
 }
 
@@ -122,8 +124,10 @@ async function rasterizePdfFirstPage(
  * MSBファースト、row-major のビット列に変換する。
  *
  * 黒 (ピクセル値 < threshold) を 1 にする。
+ *
+ * @public テスト用にexport
  */
-function packTo1BitBitmap(
+export function packTo1BitBitmap(
   rawPixels: Buffer,
   width: number,
   height: number,
